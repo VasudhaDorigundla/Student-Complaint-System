@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
+
 import { Link, useNavigate, useParams } from "react-router-dom";
+
 import {
   LayoutDashboard,
   FileText,
@@ -13,8 +15,9 @@ import {
   AlertCircle,
   CheckCircle,
   Clock,
-  UserRound,
 } from "lucide-react";
+
+import api from "../../services/api";
 
 function AdminComplaintDetails() {
   const navigate = useNavigate();
@@ -22,56 +25,114 @@ function AdminComplaintDetails() {
 
   const [user, setUser] = useState(null);
   const [complaint, setComplaint] = useState(null);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     const currentUser = JSON.parse(
       localStorage.getItem("campuscareCurrentUser") || "null"
     );
 
-    if (!currentUser || currentUser.role !== "admin") {
+    const token = localStorage.getItem("campuscareToken");
+
+    if (!currentUser || currentUser.role !== "admin" || !token) {
       navigate("/login");
       return;
     }
 
     setUser(currentUser);
 
-    const complaints = JSON.parse(
-      localStorage.getItem("campuscareComplaints") || "[]"
-    );
+    const fetchComplaint = async () => {
+      try {
+        setLoading(true);
 
-    const found = complaints.find(
-      (item) => item.id === id
-    );
+        const response = await api.get(
+          `/complaints/${id}`,
+          {
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
+          }
+        );
 
-    if (!found) {
-      navigate("/admin/all-complaints");
-      return;
-    }
+        setComplaint(response.data.complaint);
+      } catch (error) {
+        console.error(
+          "Admin complaint details error:",
+          error
+        );
 
-    setComplaint(found);
+        if (
+          error.response?.status === 401 ||
+          error.response?.status === 403
+        ) {
+          localStorage.removeItem("campuscareToken");
+          localStorage.removeItem(
+            "campuscareCurrentUser"
+          );
+
+          navigate("/login");
+          return;
+        }
+
+        navigate("/admin/all-complaints");
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchComplaint();
   }, [id, navigate]);
 
   const logout = () => {
     localStorage.removeItem("campuscareCurrentUser");
+    localStorage.removeItem("campuscareToken");
+
     navigate("/login");
   };
 
+  const formatDate = (date) => {
+    if (!date) return "—";
+
+    return new Date(date).toLocaleDateString("en-IN", {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+    });
+  };
+
+  const getStatusLabel = (status) => {
+    if (status === "IN-PROGRESS") {
+      return "In Progress";
+    }
+
+    if (status === "RESOLVED") {
+      return "Resolved";
+    }
+
+    return "Pending";
+  };
+
   const getStatusClass = (status) => {
-    if (status === "Resolved") return "resolved";
-    if (status === "In Progress") return "progress";
-    if (status === "Rejected") return "rejected";
+    if (status === "RESOLVED") {
+      return "resolved";
+    }
+
+    if (status === "IN-PROGRESS") {
+      return "progress";
+    }
+
     return "pending";
   };
 
-  if (!user || !complaint) {
+  if (loading || !user || !complaint) {
     return (
       <div className="page-loading">
-        Loading...
+        Loading complaint details...
       </div>
     );
   }
 
-  const status = complaint.status || "Pending";
+  const status = complaint.status || "PENDING";
 
   return (
     <div className="admin-layout">
@@ -85,7 +146,10 @@ function AdminComplaintDetails() {
         <div className="admin-sidebar-brand">
 
           <div className="admin-sidebar-logo">
-            C
+            <img
+              src="/college-logo.png"
+              alt="MITS College Logo"
+            />
           </div>
 
           <div>
@@ -119,6 +183,11 @@ function AdminComplaintDetails() {
             <span>Profile</span>
           </Link>
 
+          <Link to="/notifications">
+            <Bell size={19} />
+            <span>Notifications</span>
+          </Link>
+
         </nav>
 
         <div className="admin-sidebar-bottom">
@@ -132,7 +201,6 @@ function AdminComplaintDetails() {
 
       </aside>
 
-
       {/* =================================================
           MAIN
           ================================================= */}
@@ -144,6 +212,11 @@ function AdminComplaintDetails() {
         <header className="admin-topbar">
 
           <div>
+
+            <span className="admin-page-label">
+              ADMIN PORTAL
+            </span>
+
             <h2>
               Complaint Details
             </h2>
@@ -151,13 +224,17 @@ function AdminComplaintDetails() {
             <p>
               Review complete complaint information
             </p>
+
           </div>
 
           <div className="admin-topbar-right">
 
-            <button className="admin-notification-btn">
+            <Link
+              to="/notifications"
+              className="admin-notification-btn"
+            >
               <Bell size={20} />
-            </button>
+            </Link>
 
             <div className="admin-user">
 
@@ -176,7 +253,6 @@ function AdminComplaintDetails() {
 
         </header>
 
-
         {/* CONTENT */}
 
         <section className="admin-detail-page">
@@ -191,7 +267,6 @@ function AdminComplaintDetails() {
             Back to All Complaints
           </Link>
 
-
           {/* HEADER CARD */}
 
           <div className="admin-detail-header-card">
@@ -205,39 +280,38 @@ function AdminComplaintDetails() {
               <div>
 
                 <span className="admin-detail-id">
-                  {complaint.id}
+                  {complaint._id}
                 </span>
 
                 <h1>
-                  {complaint.title}
+                  {complaint.title ||
+                    "Untitled Complaint"}
                 </h1>
 
                 <p>
-                  Submitted on {complaint.date || "—"}
+                  Submitted on{" "}
+                  {formatDate(complaint.createdAt)}
                 </p>
 
               </div>
 
             </div>
 
-
             <span
               className={`admin-status-badge ${getStatusClass(
                 status
               )}`}
             >
-              {status}
+              {getStatusLabel(status)}
             </span>
 
           </div>
-
 
           {/* INFORMATION */}
 
           <div className="admin-detail-layout">
 
             <div className="admin-detail-main">
-
 
               {/* COMPLAINT INFORMATION */}
 
@@ -246,6 +320,7 @@ function AdminComplaintDetails() {
                 <div className="admin-info-card-header">
 
                   <div>
+
                     <h2>
                       Complaint Information
                     </h2>
@@ -253,12 +328,14 @@ function AdminComplaintDetails() {
                     <p>
                       Details provided by the student
                     </p>
+
                   </div>
 
                 </div>
 
-
                 <div className="admin-info-grid">
+
+                  {/* CATEGORY */}
 
                   <div className="admin-info-item">
 
@@ -267,14 +344,19 @@ function AdminComplaintDetails() {
                     </div>
 
                     <div>
+
                       <span>Category</span>
+
                       <strong>
-                        {complaint.category || "Other"}
+                        {complaint.category ||
+                          "Other"}
                       </strong>
+
                     </div>
 
                   </div>
 
+                  {/* LOCATION */}
 
                   <div className="admin-info-item">
 
@@ -283,15 +365,19 @@ function AdminComplaintDetails() {
                     </div>
 
                     <div>
+
                       <span>Location</span>
+
                       <strong>
                         {complaint.location ||
                           "Not specified"}
                       </strong>
+
                     </div>
 
                   </div>
 
+                  {/* PRIORITY */}
 
                   <div className="admin-info-item">
 
@@ -300,14 +386,19 @@ function AdminComplaintDetails() {
                     </div>
 
                     <div>
+
                       <span>Priority</span>
+
                       <strong>
-                        {complaint.priority || "Medium"}
+                        {complaint.priority ||
+                          "Medium"}
                       </strong>
+
                     </div>
 
                   </div>
 
+                  {/* DATE */}
 
                   <div className="admin-info-item">
 
@@ -316,10 +407,15 @@ function AdminComplaintDetails() {
                     </div>
 
                     <div>
+
                       <span>Submitted Date</span>
+
                       <strong>
-                        {complaint.date || "—"}
+                        {formatDate(
+                          complaint.createdAt
+                        )}
                       </strong>
+
                     </div>
 
                   </div>
@@ -328,7 +424,6 @@ function AdminComplaintDetails() {
 
               </div>
 
-
               {/* DESCRIPTION */}
 
               <div className="admin-info-card">
@@ -336,6 +431,7 @@ function AdminComplaintDetails() {
                 <div className="admin-info-card-header">
 
                   <div>
+
                     <h2>
                       Complaint Description
                     </h2>
@@ -343,6 +439,7 @@ function AdminComplaintDetails() {
                     <p>
                       Issue reported by the student
                     </p>
+
                   </div>
 
                 </div>
@@ -356,7 +453,6 @@ function AdminComplaintDetails() {
 
               </div>
 
-
               {/* RESOLUTION */}
 
               <div className="admin-info-card">
@@ -364,6 +460,7 @@ function AdminComplaintDetails() {
                 <div className="admin-info-card-header">
 
                   <div>
+
                     <h2>
                       Resolution
                     </h2>
@@ -371,6 +468,7 @@ function AdminComplaintDetails() {
                     <p>
                       Action or response provided by admin
                     </p>
+
                   </div>
 
                 </div>
@@ -407,11 +505,9 @@ function AdminComplaintDetails() {
 
             </div>
 
-
             {/* RIGHT SIDE */}
 
             <aside className="admin-detail-side">
-
 
               {/* STUDENT CARD */}
 
@@ -420,6 +516,7 @@ function AdminComplaintDetails() {
                 <div className="admin-info-card-header">
 
                   <div>
+
                     <h2>
                       Student
                     </h2>
@@ -427,6 +524,7 @@ function AdminComplaintDetails() {
                     <p>
                       Submitted by
                     </p>
+
                   </div>
 
                 </div>
@@ -434,10 +532,12 @@ function AdminComplaintDetails() {
                 <div className="admin-student-card">
 
                   <div className="admin-student-avatar">
+
                     {(complaint.studentName ||
                       "Student")
                       .charAt(0)
                       .toUpperCase()}
+
                   </div>
 
                   <div>
@@ -457,7 +557,6 @@ function AdminComplaintDetails() {
 
               </div>
 
-
               {/* STATUS FLOW */}
 
               <div className="admin-info-card">
@@ -465,6 +564,7 @@ function AdminComplaintDetails() {
                 <div className="admin-info-card-header">
 
                   <div>
+
                     <h2>
                       Status
                     </h2>
@@ -472,10 +572,10 @@ function AdminComplaintDetails() {
                     <p>
                       Complaint progress
                     </p>
+
                   </div>
 
                 </div>
-
 
                 <div className="admin-status-flow">
 
@@ -488,6 +588,7 @@ function AdminComplaintDetails() {
                     </div>
 
                     <div>
+
                       <strong>
                         Submitted
                       </strong>
@@ -495,35 +596,35 @@ function AdminComplaintDetails() {
                       <span>
                         Complaint received
                       </span>
+
                     </div>
 
                   </div>
 
-
-                  {/* CONNECTOR */}
-
                   <div className="admin-flow-line"></div>
-
 
                   {/* UNDER REVIEW */}
 
                   <div
                     className={`admin-flow-item ${
-                      status === "Pending"
+                      status === "PENDING"
                         ? "current"
                         : "completed"
                     }`}
                   >
 
                     <div className="admin-flow-icon">
-                      {status === "Pending" ? (
+
+                      {status === "PENDING" ? (
                         <Clock size={16} />
                       ) : (
                         <CheckCircle size={16} />
                       )}
+
                     </div>
 
                     <div>
+
                       <strong>
                         Under Review
                       </strong>
@@ -531,35 +632,37 @@ function AdminComplaintDetails() {
                       <span>
                         Admin reviewing
                       </span>
+
                     </div>
 
                   </div>
 
-
                   <div className="admin-flow-line"></div>
-
 
                   {/* IN PROGRESS */}
 
                   <div
                     className={`admin-flow-item ${
-                      status === "In Progress"
+                      status === "IN-PROGRESS"
                         ? "current"
-                        : status === "Resolved"
+                        : status === "RESOLVED"
                         ? "completed"
                         : ""
                     }`}
                   >
 
                     <div className="admin-flow-icon">
-                      {status === "In Progress" ? (
+
+                      {status === "IN-PROGRESS" ? (
                         <Clock size={16} />
                       ) : (
                         <CheckCircle size={16} />
                       )}
+
                     </div>
 
                     <div>
+
                       <strong>
                         In Progress
                       </strong>
@@ -567,19 +670,18 @@ function AdminComplaintDetails() {
                       <span>
                         Action being taken
                       </span>
+
                     </div>
 
                   </div>
 
-
                   <div className="admin-flow-line"></div>
-
 
                   {/* RESOLVED */}
 
                   <div
                     className={`admin-flow-item ${
-                      status === "Resolved"
+                      status === "RESOLVED"
                         ? "resolved-current"
                         : ""
                     }`}
@@ -590,6 +692,7 @@ function AdminComplaintDetails() {
                     </div>
 
                     <div>
+
                       <strong>
                         Resolved
                       </strong>
@@ -597,6 +700,7 @@ function AdminComplaintDetails() {
                       <span>
                         Issue completed
                       </span>
+
                     </div>
 
                   </div>

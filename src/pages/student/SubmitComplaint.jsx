@@ -8,6 +8,7 @@ import {
   AlertCircle,
   CheckCircle,
 } from "lucide-react";
+import api from "../../services/api";
 
 function SubmitComplaint() {
   const navigate = useNavigate();
@@ -26,6 +27,7 @@ function SubmitComplaint() {
 
   const [error, setError] = useState("");
   const [success, setSuccess] = useState(false);
+  const [loading, setLoading] = useState(false);
 
   const handleChange = (e) => {
     setForm({
@@ -36,7 +38,7 @@ function SubmitComplaint() {
     setError("");
   };
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
 
     if (!currentUser) {
@@ -54,67 +56,67 @@ function SubmitComplaint() {
       return;
     }
 
-    const complaints = JSON.parse(
-      localStorage.getItem("campuscareComplaints") || "[]"
-    );
+    const token = localStorage.getItem("campuscareToken");
 
-    const now = new Date();
+    if (!token) {
+      setError("Your session has expired. Please login again.");
+      return;
+    }
 
-    const complaint = {
-      id: `CMP${Date.now()}`,
-      studentId: currentUser.studentId || "",
-      studentEmail: currentUser.email,
-      studentName: currentUser.name,
+    setError("");
+    setLoading(true);
 
-      title: form.title.trim(),
-      category: form.category,
-      location: form.location.trim(),
-      priority: form.priority,
-      description: form.description.trim(),
-
-      status: "Pending",
-
-      date: now.toLocaleDateString("en-IN"),
-      createdAt: now.toISOString(),
-      updatedAt: now.toISOString(),
-
-      timeline: [
+    try {
+      const response = await api.post(
+        "/complaints",
         {
-          status: "Submitted",
-          date: now.toISOString(),
-          note: "Complaint submitted successfully.",
+          title: form.title.trim(),
+          category: form.category,
+          location: form.location.trim(),
+          priority: form.priority,
+          description: form.description.trim(),
         },
-      ],
-    };
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        }
+      );
 
-    localStorage.setItem(
-      "campuscareComplaints",
-      JSON.stringify([complaint, ...complaints])
-    );
+      console.log(
+        "Complaint submitted:",
+        response.data
+      );
 
-    const notifications = JSON.parse(
-      localStorage.getItem("campuscareNotifications") || "[]"
-    );
+      const complaint = response.data.complaint;
 
-    notifications.unshift({
-      id: Date.now(),
-      studentEmail: currentUser.email,
-      title: "Complaint submitted",
-      message: `${complaint.id} has been submitted successfully.`,
-      date: now.toISOString(),
-      read: false,
-    });
+      setLoading(false);
+      setSuccess(true);
 
-    localStorage.setItem(
-      "campuscareNotifications",
-      JSON.stringify(notifications)
-    );
+      setTimeout(() => {
+        navigate(
+          `/student/complaint-details/${complaint._id}`
+        );
+      }, 800);
+    } catch (error) {
+      console.error(
+        "Complaint submission error:",
+        error
+      );
 
-    setSuccess(true);
+      setLoading(false);
 
-    setTimeout(() => {
-      navigate(`/student/complaint-details/${complaint.id}`);
-    }, 800);
+      if (error.response) {
+        setError(
+          error.response.data?.message ||
+            "Unable to submit complaint."
+        );
+      } else {
+        setError(
+          "Unable to connect to CampusCare server."
+        );
+      }
+    }
   };
 
   return (
@@ -124,8 +126,13 @@ function SubmitComplaint() {
 
       <aside className="student-sidebar">
 
-        <Link to="/student/dashboard" className="student-brand">
-          <div className="student-brand-icon">C</div>
+        <Link
+          to="/student/dashboard"
+          className="student-brand"
+        >
+          <div className="student-brand-icon">
+            C
+          </div>
 
           <div>
             <strong>CampusCare</strong>
@@ -165,6 +172,7 @@ function SubmitComplaint() {
         </nav>
 
         <div className="student-sidebar-help">
+
           <strong>Need Help?</strong>
 
           <p>
@@ -175,15 +183,19 @@ function SubmitComplaint() {
           <a href="mailto:admin@campuscare.com">
             Contact Admin →
           </a>
+
         </div>
 
         <div className="student-sidebar-user">
 
           <div className="student-sidebar-avatar">
-            {currentUser?.name?.charAt(0)?.toUpperCase() || "S"}
+            {currentUser?.name
+              ?.charAt(0)
+              ?.toUpperCase() || "S"}
           </div>
 
           <div>
+
             <strong>
               {currentUser?.name || "Student"}
             </strong>
@@ -191,6 +203,7 @@ function SubmitComplaint() {
             <span>
               {currentUser?.department || "Student"}
             </span>
+
           </div>
 
         </div>
@@ -206,25 +219,33 @@ function SubmitComplaint() {
         <header className="student-topbar">
 
           <div>
+
             <span className="student-top-label">
               STUDENT PORTAL
             </span>
 
-            <h2>Submit Complaint</h2>
+            <h2>
+              Submit Complaint
+            </h2>
+
           </div>
 
           <div className="student-top-user">
 
             <div className="student-top-avatar">
-              {currentUser?.name?.charAt(0)?.toUpperCase() || "S"}
+              {currentUser?.name
+                ?.charAt(0)
+                ?.toUpperCase() || "S"}
             </div>
 
             <div>
+
               <strong>
                 {currentUser?.name || "Student"}
               </strong>
 
               <span>Student</span>
+
             </div>
 
           </div>
@@ -246,7 +267,10 @@ function SubmitComplaint() {
           <div className="complaint-page-header">
 
             <div>
-              <span>NEW COMPLAINT</span>
+
+              <span>
+                NEW COMPLAINT
+              </span>
 
               <h1>
                 Report a Campus Issue
@@ -256,6 +280,7 @@ function SubmitComplaint() {
                 Provide the details below so the administration
                 can review and resolve your concern.
               </p>
+
             </div>
 
             <div className="complaint-header-icon">
@@ -269,16 +294,23 @@ function SubmitComplaint() {
           <div className="complaint-form-card">
 
             <div className="form-card-heading">
+
               <div>
-                <h2>Complaint Information</h2>
+
+                <h2>
+                  Complaint Information
+                </h2>
+
                 <p>
                   Fields marked with * are required.
                 </p>
+
               </div>
 
               <div className="required-note">
                 * Required
               </div>
+
             </div>
 
             <form onSubmit={handleSubmit}>
@@ -288,7 +320,8 @@ function SubmitComplaint() {
               <div className="form-field full">
 
                 <label>
-                  Complaint Title <span>*</span>
+                  Complaint Title{" "}
+                  <span>*</span>
                 </label>
 
                 <input
@@ -297,6 +330,7 @@ function SubmitComplaint() {
                   value={form.title}
                   onChange={handleChange}
                   placeholder="Example: Hostel water supply problem"
+                  disabled={loading}
                 />
 
               </div>
@@ -308,14 +342,17 @@ function SubmitComplaint() {
                 <div className="form-field">
 
                   <label>
-                    Category <span>*</span>
+                    Category{" "}
+                    <span>*</span>
                   </label>
 
                   <select
                     name="category"
                     value={form.category}
                     onChange={handleChange}
+                    disabled={loading}
                   >
+
                     <option value="">
                       Select category
                     </option>
@@ -363,7 +400,8 @@ function SubmitComplaint() {
                 <div className="form-field">
 
                   <label>
-                    Location <span>*</span>
+                    Location{" "}
+                    <span>*</span>
                   </label>
 
                   <div className="input-with-icon">
@@ -376,6 +414,7 @@ function SubmitComplaint() {
                       value={form.location}
                       onChange={handleChange}
                       placeholder="Example: Block A, Room 204"
+                      disabled={loading}
                     />
 
                   </div>
@@ -394,34 +433,40 @@ function SubmitComplaint() {
 
                 <div className="priority-options">
 
-                  {["Low", "Medium", "High", "Urgent"].map(
-                    (priority) => (
-                      <label
-                        key={priority}
-                        className={
+                  {[
+                    "Low",
+                    "Medium",
+                    "High",
+                    "Urgent",
+                  ].map((priority) => (
+
+                    <label
+                      key={priority}
+                      className={
+                        form.priority === priority
+                          ? `priority-option selected ${priority.toLowerCase()}`
+                          : "priority-option"
+                      }
+                    >
+
+                      <input
+                        type="radio"
+                        name="priority"
+                        value={priority}
+                        checked={
                           form.priority === priority
-                            ? `priority-option selected ${priority.toLowerCase()}`
-                            : "priority-option"
                         }
-                      >
+                        onChange={handleChange}
+                        disabled={loading}
+                      />
 
-                        <input
-                          type="radio"
-                          name="priority"
-                          value={priority}
-                          checked={
-                            form.priority === priority
-                          }
-                          onChange={handleChange}
-                        />
+                      <span>
+                        {priority}
+                      </span>
 
-                        <span>
-                          {priority}
-                        </span>
+                    </label>
 
-                      </label>
-                    )
-                  )}
+                  ))}
 
                 </div>
 
@@ -432,7 +477,8 @@ function SubmitComplaint() {
               <div className="form-field">
 
                 <label>
-                  Description <span>*</span>
+                  Description{" "}
+                  <span>*</span>
                 </label>
 
                 <textarea
@@ -441,6 +487,7 @@ function SubmitComplaint() {
                   onChange={handleChange}
                   placeholder="Describe the issue clearly. Include any useful details that can help the administration understand the problem."
                   rows="6"
+                  disabled={loading}
                 />
 
                 <small>
@@ -493,13 +540,17 @@ function SubmitComplaint() {
                 <button
                   type="submit"
                   className="submit-complaint-btn"
-                  disabled={success}
+                  disabled={loading || success}
                 >
+
                   <Send size={16} />
 
-                  {success
+                  {loading
+                    ? "Submitting..."
+                    : success
                     ? "Submitted"
                     : "Submit Complaint"}
+
                 </button>
 
               </div>

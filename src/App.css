@@ -182,3 +182,14 @@
     border-right-color: var(--border);
   }
 }
+.notification-error {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 16px 0;
+  padding: 14px 16px;
+  color: #b91c1c;
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  border-radius: 10px;
+}

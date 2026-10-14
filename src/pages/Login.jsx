@@ -9,6 +9,7 @@ import {
   UserRound,
   ArrowRight,
 } from "lucide-react";
+import api from "../services/api";
 
 function Login() {
   const navigate = useNavigate();
@@ -20,108 +21,80 @@ function Login() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
-  const handleLogin = (e) => {
+  const handleLogin = async (e) => {
     e.preventDefault();
 
     setError("");
     setLoading(true);
 
-    setTimeout(() => {
+    try {
       const cleanEmail = email.trim().toLowerCase();
 
-      /* =================================================
-         ADMIN LOGIN
-         ================================================= */
+      const response = await api.post("/auth/login", {
+        email: cleanEmail,
+        password,
+      });
 
-      if (role === "admin") {
-        if (
-          cleanEmail === "admin@campuscare.com" &&
-          password === "admin123"
-        ) {
-          const adminUser = {
-            name: "CampusCare Admin",
-            email: "admin@campuscare.com",
-            role: "admin",
-          };
+      const { token, user } = response.data;
 
-          // Remove any old student session
-          localStorage.removeItem("campuscareCurrentUser");
-
-          // Create fresh admin session
-          localStorage.setItem(
-            "campuscareCurrentUser",
-            JSON.stringify(adminUser)
-          );
-
-          setLoading(false);
-
-          navigate("/admin/dashboard", {
-            replace: true,
-          });
-
-          return;
-        }
-
-        setLoading(false);
-        setError(
-          "Invalid admin email or password."
-        );
-
-        return;
-      }
-
-
-      /* =================================================
-         STUDENT LOGIN
-         ================================================= */
-
-      const users = JSON.parse(
-        localStorage.getItem("campuscareUsers") || "[]"
-      );
-
-      const student = users.find(
-        (user) =>
-          user.email?.toLowerCase() === cleanEmail &&
-          user.password === password &&
-          user.role === "student"
-      );
-
-      if (!student) {
+      // Make sure selected login role matches backend role
+      if (user.role !== role) {
         setLoading(false);
 
         setError(
-          "Invalid student email or password."
+          `This account is registered as ${user.role}. Please select ${user.role} login.`
         );
 
         return;
       }
 
       // Remove old session
-      localStorage.removeItem(
-        "campuscareCurrentUser"
-      );
+      localStorage.removeItem("campuscareCurrentUser");
+      localStorage.removeItem("campuscareToken");
 
-      // Create student session
+      // Save JWT token
+      localStorage.setItem("campuscareToken", token);
+
+      // Save logged-in user
       localStorage.setItem(
         "campuscareCurrentUser",
-        JSON.stringify(student)
+        JSON.stringify(user)
       );
 
       setLoading(false);
 
-      navigate("/student/dashboard", {
-        replace: true,
-      });
-    }, 500);
-  };
+      // Navigate according to role
+      if (user.role === "admin") {
+        navigate("/admin/dashboard", {
+          replace: true,
+        });
+      } else {
+        navigate("/student/dashboard", {
+          replace: true,
+        });
+      }
+    } catch (error) {
+      console.error("Login error:", error);
 
+      setLoading(false);
+
+      if (error.response) {
+        setError(
+          error.response.data?.message ||
+            "Invalid email or password."
+        );
+      } else {
+        setError(
+          "Unable to connect to CampusCare server."
+        );
+      }
+    }
+  };
 
   return (
     <div className="login-page">
 
-      {/* =================================================
-          LEFT SIDE
-          ================================================= */}
+      {/* LEFT SIDE */}
 
       <div className="login-left">
 
@@ -137,7 +110,6 @@ function Login() {
           </div>
 
         </div>
-
 
         <div className="login-hero">
 
@@ -161,10 +133,7 @@ function Login() {
 
       </div>
 
-
-      {/* =================================================
-          RIGHT SIDE
-          ================================================= */}
+      {/* RIGHT SIDE */}
 
       <div className="login-right">
 
@@ -182,10 +151,7 @@ function Login() {
 
           </div>
 
-
-          {/* =================================================
-              ROLE SELECTOR
-              ================================================= */}
+          {/* ROLE SELECTOR */}
 
           <div className="login-role-selector">
 
@@ -208,7 +174,6 @@ function Login() {
               </span>
             </button>
 
-
             <button
               type="button"
               className={
@@ -230,23 +195,15 @@ function Login() {
 
           </div>
 
-
-          {/* =================================================
-              ERROR
-              ================================================= */}
+          {/* ERROR */}
 
           {error && (
-
             <div className="login-error">
               {error}
             </div>
-
           )}
 
-
-          {/* =================================================
-              FORM
-              ================================================= */}
+          {/* FORM */}
 
           <form onSubmit={handleLogin}>
 
@@ -280,7 +237,6 @@ function Login() {
 
             </div>
 
-
             {/* PASSWORD */}
 
             <div className="login-field">
@@ -311,9 +267,7 @@ function Login() {
                   type="button"
                   className="login-password-toggle"
                   onClick={() =>
-                    setShowPassword(
-                      !showPassword
-                    )
+                    setShowPassword(!showPassword)
                   }
                 >
                   {showPassword ? (
@@ -326,7 +280,6 @@ function Login() {
               </div>
 
             </div>
-
 
             {/* LOGIN */}
 
@@ -352,7 +305,6 @@ function Login() {
 
           </form>
 
-
           {/* REGISTER */}
 
           {role === "student" && (
@@ -368,7 +320,6 @@ function Login() {
             </div>
 
           )}
-
 
           {/* ADMIN DEMO DETAILS */}
 

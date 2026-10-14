@@ -13,7 +13,10 @@ import {
   FileText,
   User,
   LogOut,
+  AlertCircle,
 } from "lucide-react";
+
+import api from "../../services/api";
 
 function ComplaintDetails() {
   const { id } = useParams();
@@ -21,45 +24,224 @@ function ComplaintDetails() {
 
   const [complaint, setComplaint] = useState(null);
   const [user, setUser] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
 
   useEffect(() => {
-    const currentUser = JSON.parse(
-      localStorage.getItem("campuscareCurrentUser") || "null"
-    );
+    const loadComplaint = async () => {
+      const currentUser = JSON.parse(
+        localStorage.getItem("campuscareCurrentUser") || "null"
+      );
 
-    if (!currentUser) {
-      navigate("/login");
-      return;
-    }
+      const token = localStorage.getItem("campuscareToken");
 
-    setUser(currentUser);
+      if (!currentUser || !token) {
+        navigate("/login");
+        return;
+      }
 
-    const complaints = JSON.parse(
-      localStorage.getItem("campuscareComplaints") || "[]"
-    );
+      setUser(currentUser);
 
-    const found = complaints.find(
-      (item) => String(item.id) === String(id)
-    );
+      try {
+        const response = await api.get(`/complaints/${id}`, {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        });
 
-    if (!found) {
-      navigate("/student/my-complaints");
-      return;
-    }
+        setComplaint(response.data.complaint);
+        setError("");
+      } catch (error) {
+        console.error("Get complaint details error:", error);
 
-    setComplaint(found);
+        if (error.response?.status === 401) {
+          localStorage.removeItem("campuscareToken");
+          localStorage.removeItem("campuscareCurrentUser");
+
+          navigate("/login");
+          return;
+        }
+
+        if (error.response?.status === 403) {
+          setError(
+            "You are not allowed to view this complaint."
+          );
+        } else if (error.response?.status === 404) {
+          setError("Complaint not found.");
+        } else {
+          setError(
+            error.response?.data?.message ||
+              "Unable to load complaint details."
+          );
+        }
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadComplaint();
   }, [id, navigate]);
 
   const logout = () => {
     localStorage.removeItem("campuscareCurrentUser");
+    localStorage.removeItem("campuscareToken");
+
     navigate("/login");
   };
 
-  if (!complaint || !user) {
-    return <div>Loading...</div>;
+  /*
+    Convert backend MongoDB status
+    to the display status used by the UI.
+  */
+
+  const getStatusText = (backendStatus) => {
+    if (backendStatus === "IN-PROGRESS") {
+      return "In Progress";
+    }
+
+    if (backendStatus === "RESOLVED") {
+      return "Resolved";
+    }
+
+    return "Pending";
+  };
+
+  const formatDate = (date) => {
+    if (!date) {
+      return "—";
+    }
+
+    return new Date(date).toLocaleDateString("en-IN", {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+    });
+  };
+
+  if (loading) {
+    return (
+      <div className="student-layout">
+        <aside className="student-sidebar">
+
+          <div className="sidebar-brand">
+            <div className="sidebar-logo">
+              C
+            </div>
+
+            <div>
+              <strong>CampusCare</strong>
+              <span>Grievance Portal</span>
+            </div>
+          </div>
+
+        </aside>
+
+        <main className="student-main">
+
+          <header className="student-topbar">
+            <div>
+              <h2>Complaint Details</h2>
+              <p>
+                View your complaint status and updates
+              </p>
+            </div>
+          </header>
+
+          <section className="details-content">
+
+            <div className="complaints-empty">
+
+              <div className="empty-icon">
+                <FileText size={32} />
+              </div>
+
+              <h2>
+                Loading complaint...
+              </h2>
+
+              <p>
+                Please wait while we load the complaint
+                from the server.
+              </p>
+
+            </div>
+
+          </section>
+
+        </main>
+      </div>
+    );
   }
 
-  const status = complaint.status || "Pending";
+  if (error || !complaint || !user) {
+    return (
+      <div className="student-layout">
+
+        <aside className="student-sidebar">
+
+          <div className="sidebar-brand">
+
+            <div className="sidebar-logo">
+              C
+            </div>
+
+            <div>
+              <strong>CampusCare</strong>
+              <span>Grievance Portal</span>
+            </div>
+
+          </div>
+
+        </aside>
+
+        <main className="student-main">
+
+          <header className="student-topbar">
+
+            <div>
+              <h2>Complaint Details</h2>
+
+              <p>
+                View your complaint status and updates
+              </p>
+            </div>
+
+          </header>
+
+          <section className="details-content">
+
+            <div className="complaints-empty">
+
+              <div className="empty-icon">
+                <AlertCircle size={32} />
+              </div>
+
+              <h2>
+                Unable to load complaint
+              </h2>
+
+              <p>
+                {error || "Complaint not found."}
+              </p>
+
+              <Link
+                to="/student/my-complaints"
+                className="new-complaint-btn"
+              >
+                Back to My Complaints
+              </Link>
+
+            </div>
+
+          </section>
+
+        </main>
+
+      </div>
+    );
+  }
+
+  const status = getStatusText(complaint.status);
 
   /*
     STATUS FLOW
@@ -182,7 +364,6 @@ function ComplaintDetails() {
 
           </div>
 
-
           <div className="topbar-right">
 
             <button className="notification-btn">
@@ -212,7 +393,6 @@ function ComplaintDetails() {
         ===================================================== */}
 
         <section className="details-content">
-
 
           {/* =================================================
               BACK TO MY COMPLAINTS
@@ -245,7 +425,7 @@ function ComplaintDetails() {
             <div className="complaint-header-info">
 
               <div className="detail-id">
-                {complaint.id}
+                {complaint._id}
               </div>
 
               <h1>
@@ -253,11 +433,11 @@ function ComplaintDetails() {
               </h1>
 
               <p>
-                Submitted on {complaint.date}
+                Submitted on{" "}
+                {formatDate(complaint.createdAt)}
               </p>
 
             </div>
-
 
             <span
               className={`detail-status ${
@@ -290,16 +470,11 @@ function ComplaintDetails() {
 
             </div>
 
-
             <div className="description-box">
-
               {complaint.description}
-
             </div>
 
-
             <div className="info-grid">
-
 
               {/* CATEGORY */}
 
@@ -362,7 +537,7 @@ function ComplaintDetails() {
                   </span>
 
                   <strong>
-                    {complaint.priority}
+                    {complaint.priority || "Medium"}
                   </strong>
 
                 </div>
@@ -385,7 +560,7 @@ function ComplaintDetails() {
                   </span>
 
                   <strong>
-                    {complaint.date}
+                    {formatDate(complaint.createdAt)}
                   </strong>
 
                 </div>
@@ -416,10 +591,7 @@ function ComplaintDetails() {
 
             <div className="new-status-flow">
 
-
-              {/* =================================================
-                  STEP 1 - SUBMITTED
-              ================================================= */}
+              {/* STEP 1 - SUBMITTED */}
 
               <div
                 className={`new-flow-step ${
@@ -462,9 +634,7 @@ function ComplaintDetails() {
               />
 
 
-              {/* =================================================
-                  STEP 2 - UNDER REVIEW
-              ================================================= */}
+              {/* STEP 2 - UNDER REVIEW */}
 
               <div
                 className={`new-flow-step ${
@@ -509,9 +679,7 @@ function ComplaintDetails() {
               />
 
 
-              {/* =================================================
-                  STEP 3 - IN PROGRESS
-              ================================================= */}
+              {/* STEP 3 - IN PROGRESS */}
 
               <div
                 className={`new-flow-step ${
@@ -555,9 +723,7 @@ function ComplaintDetails() {
               />
 
 
-              {/* =================================================
-                  STEP 4 - RESOLVED
-              ================================================= */}
+              {/* STEP 4 - RESOLVED */}
 
               <div
                 className={`new-flow-step ${
@@ -586,9 +752,7 @@ function ComplaintDetails() {
             </div>
 
 
-            {/* =================================================
-                CURRENT STATUS MESSAGE
-            ================================================= */}
+            {/* CURRENT STATUS MESSAGE */}
 
             <div
               className={`new-current-status ${
@@ -614,9 +778,6 @@ function ComplaintDetails() {
 
                 {status === "Resolved" &&
                   "Your complaint has been resolved successfully."}
-
-                {status === "Rejected" &&
-                  "Your complaint has been reviewed and rejected by the administration."}
 
               </p>
 

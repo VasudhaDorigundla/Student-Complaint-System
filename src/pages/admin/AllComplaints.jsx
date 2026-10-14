@@ -12,73 +12,123 @@ import {
   Filter,
   X,
   CheckCircle,
+  AlertCircle,
 } from "lucide-react";
+import api from "../../services/api";
 
 function AllComplaints() {
   const navigate = useNavigate();
 
   const [user, setUser] = useState(null);
   const [complaints, setComplaints] = useState([]);
+
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("All");
   const [categoryFilter, setCategoryFilter] = useState("All");
 
   const [selectedComplaint, setSelectedComplaint] = useState(null);
-
-  // NEW:
-  // Stores the status selected inside the modal.
-  // It will NOT update the table until Save Resolution is clicked.
   const [selectedStatus, setSelectedStatus] = useState("");
-
   const [resolution, setResolution] = useState("");
 
-  // Success popup
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
+  const [error, setError] = useState("");
   const [showSuccess, setShowSuccess] = useState(false);
 
+  // =====================================================
+  // LOAD ADMIN + COMPLAINTS
+  // =====================================================
+
   useEffect(() => {
-    const currentUser = JSON.parse(
-      localStorage.getItem("campuscareCurrentUser") || "null"
-    );
+    const loadComplaints = async () => {
+      const currentUser = JSON.parse(
+        localStorage.getItem("campuscareCurrentUser") || "null"
+      );
 
-    if (!currentUser || currentUser.role !== "admin") {
-      navigate("/login");
-      return;
-    }
+      const token = localStorage.getItem("campuscareToken");
 
-    setUser(currentUser);
+      if (
+        !currentUser ||
+        currentUser.role !== "admin" ||
+        !token
+      ) {
+        navigate("/login");
+        return;
+      }
 
-    const saved = JSON.parse(
-      localStorage.getItem("campuscareComplaints") || "[]"
-    );
+      setUser(currentUser);
 
-    setComplaints(saved);
+      try {
+        const response = await api.get(
+          "/complaints/admin/all",
+          {
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
+          }
+        );
+
+        setComplaints(
+          response.data.complaints || []
+        );
+
+        setError("");
+      } catch (error) {
+        console.error(
+          "Get admin complaints error:",
+          error
+        );
+
+        if (error.response?.status === 401) {
+          localStorage.removeItem("campuscareToken");
+          localStorage.removeItem(
+            "campuscareCurrentUser"
+          );
+
+          navigate("/login");
+          return;
+        }
+
+        if (error.response?.status === 403) {
+          setError(
+            "You do not have admin access."
+          );
+        } else {
+          setError(
+            error.response?.data?.message ||
+              "Unable to load complaints."
+          );
+        }
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadComplaints();
   }, [navigate]);
 
-  const saveComplaints = (updated) => {
-    setComplaints(updated);
-
-    localStorage.setItem(
-      "campuscareComplaints",
-      JSON.stringify(updated)
-    );
-  };
-
   // =====================================================
-  // OPEN COMPLAINT
+  // OPEN DETAILS
   // =====================================================
 
   const openDetails = (complaint) => {
     setSelectedComplaint(complaint);
 
-    // Initially selected status = current status
-    setSelectedStatus(complaint.status || "Pending");
+    setSelectedStatus(
+      complaint.status || "PENDING"
+    );
 
-    setResolution(complaint.resolution || "");
+    setResolution(
+      complaint.resolution || ""
+    );
+
+    setError("");
   };
 
   // =====================================================
-  // SELECT STATUS ONLY
-  // DOES NOT UPDATE THE COMPLAINT YET
+  // STATUS SELECTION
   // =====================================================
 
   const selectStatus = (status) => {
@@ -89,56 +139,161 @@ function AllComplaints() {
   // SAVE STATUS + RESOLUTION
   // =====================================================
 
-  const saveResolution = () => {
-    if (!selectedComplaint) return;
+  const saveResolution = async () => {
+    if (!selectedComplaint) {
+      return;
+    }
 
-    const updated = complaints.map((item) =>
-      item.id === selectedComplaint.id
-        ? {
-            ...item,
-
-            // Status changes ONLY HERE
-            status: selectedStatus,
-
-            resolution: resolution,
-          }
-        : item
+    const token = localStorage.getItem(
+      "campuscareToken"
     );
 
-    saveComplaints(updated);
+    if (!token) {
+      navigate("/login");
+      return;
+    }
 
-    // Close modal
-    setSelectedComplaint(null);
+    setSaving(true);
+    setError("");
 
-    // Clear fields
-    setResolution("");
-    setSelectedStatus("");
+    try {
+      const response = await api.put(
+        `/complaints/admin/${selectedComplaint._id}`,
+        {
+          status: selectedStatus,
+          resolution: resolution.trim(),
+        },
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        }
+      );
 
-    // Show success popup
-    setShowSuccess(true);
+      const updatedComplaint =
+        response.data.complaint;
 
-    // Hide popup after 2 seconds
-    setTimeout(() => {
-      setShowSuccess(false);
-    }, 2000);
+      setComplaints((previous) =>
+        previous.map((item) =>
+          item._id === updatedComplaint._id
+            ? updatedComplaint
+            : item
+        )
+      );
+
+      setSelectedComplaint(null);
+      setSelectedStatus("");
+      setResolution("");
+
+      setShowSuccess(true);
+
+      setTimeout(() => {
+        setShowSuccess(false);
+      }, 2500);
+    } catch (error) {
+      console.error(
+        "Update complaint error:",
+        error
+      );
+
+      if (error.response?.status === 401) {
+        localStorage.removeItem(
+          "campuscareToken"
+        );
+        localStorage.removeItem(
+          "campuscareCurrentUser"
+        );
+
+        navigate("/login");
+        return;
+      }
+
+      setError(
+        error.response?.data?.message ||
+          "Unable to update complaint."
+      );
+    } finally {
+      setSaving(false);
+    }
   };
 
   // =====================================================
   // DELETE COMPLAINT
   // =====================================================
 
-  const deleteComplaint = (id) => {
+  const deleteComplaint = async (id) => {
     const confirmDelete = window.confirm(
       "Are you sure you want to delete this complaint?"
     );
 
-    if (!confirmDelete) return;
+    if (!confirmDelete) {
+      return;
+    }
 
-    const updated = complaints.filter(
-      (item) => item.id !== id
+    const token = localStorage.getItem(
+      "campuscareToken"
     );
 
-    saveComplaints(updated);
+    if (!token) {
+      navigate("/login");
+      return;
+    }
+
+    setDeleting(true);
+    setError("");
+
+    try {
+      await api.delete(
+        `/complaints/admin/${id}`,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        }
+      );
+
+      setComplaints((previous) =>
+        previous.filter(
+          (item) => item._id !== id
+        )
+      );
+
+      if (
+        selectedComplaint?._id === id
+      ) {
+        setSelectedComplaint(null);
+      }
+
+      setShowSuccess(true);
+
+      setTimeout(() => {
+        setShowSuccess(false);
+      }, 2500);
+    } catch (error) {
+      console.error(
+        "Delete complaint error:",
+        error
+      );
+
+      if (error.response?.status === 401) {
+        localStorage.removeItem(
+          "campuscareToken"
+        );
+        localStorage.removeItem(
+          "campuscareCurrentUser"
+        );
+
+        navigate("/login");
+        return;
+      }
+
+      setError(
+        error.response?.data?.message ||
+          "Unable to delete complaint."
+      );
+    } finally {
+      setDeleting(false);
+    }
   };
 
   // =====================================================
@@ -146,8 +301,47 @@ function AllComplaints() {
   // =====================================================
 
   const logout = () => {
-    localStorage.removeItem("campuscareCurrentUser");
+    localStorage.removeItem(
+      "campuscareCurrentUser"
+    );
+
+    localStorage.removeItem(
+      "campuscareToken"
+    );
+
     navigate("/login");
+  };
+
+  // =====================================================
+  // DISPLAY STATUS
+  // =====================================================
+
+  const getStatusText = (status) => {
+    if (status === "IN-PROGRESS") {
+      return "In Progress";
+    }
+
+    if (status === "RESOLVED") {
+      return "Resolved";
+    }
+
+    return "Pending";
+  };
+
+  // =====================================================
+  // STATUS CLASS
+  // =====================================================
+
+  const getStatusClass = (status) => {
+    if (status === "RESOLVED") {
+      return "resolved";
+    }
+
+    if (status === "IN-PROGRESS") {
+      return "progress";
+    }
+
+    return "pending";
   };
 
   // =====================================================
@@ -164,46 +358,64 @@ function AllComplaints() {
   ];
 
   // =====================================================
-  // FILTER COMPLAINTS
+  // DATE
   // =====================================================
 
-  const filteredComplaints = complaints.filter((item) => {
-    const searchText = search.toLowerCase();
+  const formatDate = (date) => {
+    if (!date) {
+      return "—";
+    }
 
-    const matchesSearch =
-      item.title?.toLowerCase().includes(searchText) ||
-      item.category?.toLowerCase().includes(searchText) ||
-      item.location?.toLowerCase().includes(searchText) ||
-      item.id?.toLowerCase().includes(searchText);
-
-    const matchesStatus =
-      statusFilter === "All" ||
-      item.status === statusFilter;
-
-    const matchesCategory =
-      categoryFilter === "All" ||
-      item.category === categoryFilter;
-
-    return (
-      matchesSearch &&
-      matchesStatus &&
-      matchesCategory
+    return new Date(date).toLocaleDateString(
+      "en-IN",
+      {
+        day: "2-digit",
+        month: "short",
+        year: "numeric",
+      }
     );
-  });
-
-  // =====================================================
-  // STATUS CLASS
-  // =====================================================
-
-  const getStatusClass = (status) => {
-    if (status === "Resolved") return "resolved";
-
-    if (status === "In Progress") return "progress";
-
-    if (status === "Rejected") return "rejected";
-
-    return "pending";
   };
+
+  // =====================================================
+  // FILTER
+  // =====================================================
+
+  const filteredComplaints =
+    complaints.filter((item) => {
+      const searchText =
+        search.toLowerCase();
+
+      const matchesSearch =
+        item.title
+          ?.toLowerCase()
+          .includes(searchText) ||
+        item.category
+          ?.toLowerCase()
+          .includes(searchText) ||
+        item.location
+          ?.toLowerCase()
+          .includes(searchText) ||
+        item._id
+          ?.toLowerCase()
+          .includes(searchText) ||
+        item.studentName
+          ?.toLowerCase()
+          .includes(searchText);
+
+      const matchesStatus =
+        statusFilter === "All" ||
+        item.status === statusFilter;
+
+      const matchesCategory =
+        categoryFilter === "All" ||
+        item.category === categoryFilter;
+
+      return (
+        matchesSearch &&
+        matchesStatus &&
+        matchesCategory
+      );
+    });
 
   if (!user) {
     return (
@@ -272,14 +484,11 @@ function AllComplaints() {
 
       </aside>
 
-
       {/* =================================================
-          MAIN CONTENT
+          MAIN
           ================================================= */}
 
       <main className="admin-main">
-
-        {/* TOP BAR */}
 
         <header className="admin-topbar">
 
@@ -300,12 +509,19 @@ function AllComplaints() {
             <div className="admin-user">
 
               <div className="admin-user-avatar">
-                {user.name?.charAt(0).toUpperCase()}
+                {user.name
+                  ?.charAt(0)
+                  .toUpperCase()}
               </div>
 
               <div>
-                <strong>{user.name}</strong>
-                <span>Administrator</span>
+                <strong>
+                  {user.name}
+                </strong>
+
+                <span>
+                  Administrator
+                </span>
               </div>
 
             </div>
@@ -314,9 +530,8 @@ function AllComplaints() {
 
         </header>
 
-
         {/* =================================================
-            COMPLAINT CONTENT
+            CONTENT
             ================================================= */}
 
         <section className="admin-complaints-content">
@@ -330,17 +545,32 @@ function AllComplaints() {
               </h1>
 
               <p>
-                Review, update and resolve student complaints.
+                Review, update and resolve
+                student complaints.
               </p>
 
             </div>
 
             <div className="admin-total-count">
-              {filteredComplaints.length} Complaints
+              {filteredComplaints.length}{" "}
+              Complaints
             </div>
 
           </div>
 
+          {/* ERROR */}
+
+          {error && (
+
+            <div className="complaint-form-error">
+
+              <AlertCircle size={17} />
+
+              {error}
+
+            </div>
+
+          )}
 
           {/* FILTERS */}
 
@@ -361,7 +591,6 @@ function AllComplaints() {
 
             </div>
 
-
             <div className="admin-filter-select">
 
               <Filter size={16} />
@@ -369,7 +598,9 @@ function AllComplaints() {
               <select
                 value={statusFilter}
                 onChange={(e) =>
-                  setStatusFilter(e.target.value)
+                  setStatusFilter(
+                    e.target.value
+                  )
                 }
               >
 
@@ -377,26 +608,21 @@ function AllComplaints() {
                   All Status
                 </option>
 
-                <option value="Pending">
+                <option value="PENDING">
                   Pending
                 </option>
 
-                <option value="In Progress">
+                <option value="IN-PROGRESS">
                   In Progress
                 </option>
 
-                <option value="Resolved">
+                <option value="RESOLVED">
                   Resolved
-                </option>
-
-                <option value="Rejected">
-                  Rejected
                 </option>
 
               </select>
 
             </div>
-
 
             <div className="admin-filter-select">
 
@@ -405,22 +631,26 @@ function AllComplaints() {
               <select
                 value={categoryFilter}
                 onChange={(e) =>
-                  setCategoryFilter(e.target.value)
+                  setCategoryFilter(
+                    e.target.value
+                  )
                 }
               >
 
-                {categories.map((category) => (
+                {categories.map(
+                  (category) => (
 
-                  <option
-                    key={category}
-                    value={category}
-                  >
-                    {category === "All"
-                      ? "All Categories"
-                      : category}
-                  </option>
+                    <option
+                      key={category}
+                      value={category}
+                    >
+                      {category === "All"
+                        ? "All Categories"
+                        : category}
+                    </option>
 
-                ))}
+                  )
+                )}
 
               </select>
 
@@ -428,14 +658,29 @@ function AllComplaints() {
 
           </div>
 
-
-          {/* =================================================
-              TABLE
-              ================================================= */}
+          {/* TABLE */}
 
           <div className="admin-table-card">
 
-            {filteredComplaints.length === 0 ? (
+            {loading ? (
+
+              <div className="admin-table-empty">
+
+                <FileText size={40} />
+
+                <h3>
+                  Loading complaints...
+                </h3>
+
+                <p>
+                  Fetching complaints
+                  from MongoDB.
+                </p>
+
+              </div>
+
+            ) : filteredComplaints.length ===
+              0 ? (
 
               <div className="admin-table-empty">
 
@@ -446,7 +691,8 @@ function AllComplaints() {
                 </h3>
 
                 <p>
-                  Try changing your search or filters.
+                  Try changing your
+                  search or filters.
                 </p>
 
               </div>
@@ -463,6 +709,10 @@ function AllComplaints() {
 
                       <th>
                         Complaint
+                      </th>
+
+                      <th>
+                        Student
                       </th>
 
                       <th>
@@ -489,32 +739,36 @@ function AllComplaints() {
 
                   </thead>
 
-
                   <tbody>
 
                     {filteredComplaints.map(
                       (complaint) => (
 
-                        <tr key={complaint.id}>
+                        <tr
+                          key={
+                            complaint._id
+                          }
+                        >
 
                           <td>
 
                             <div className="admin-table-title">
 
                               <div className="admin-table-icon">
-
-                                <FileText size={17} />
-
+                                <FileText
+                                  size={17}
+                                />
                               </div>
 
                               <div>
 
                                 <strong>
-                                  {complaint.title}
+                                  {complaint.title ||
+                                    "Complaint"}
                                 </strong>
 
                                 <span>
-                                  {complaint.id}
+                                  {complaint._id}
                                 </span>
 
                               </div>
@@ -523,23 +777,27 @@ function AllComplaints() {
 
                           </td>
 
+                          <td>
+                            {complaint.studentName ||
+                              complaint.student?.name ||
+                              "Student"}
+                          </td>
 
                           <td>
                             {complaint.category ||
                               "Other"}
                           </td>
 
-
                           <td>
                             {complaint.location ||
                               "Not specified"}
                           </td>
 
-
                           <td>
-                            {complaint.date || "—"}
+                            {formatDate(
+                              complaint.createdAt
+                            )}
                           </td>
-
 
                           <td>
 
@@ -548,11 +806,12 @@ function AllComplaints() {
                                 complaint.status
                               )}`}
                             >
-                              {complaint.status}
+                              {getStatusText(
+                                complaint.status
+                              )}
                             </span>
 
                           </td>
-
 
                           <td>
 
@@ -570,17 +829,21 @@ function AllComplaints() {
                                 <Eye size={16} />
                               </button>
 
-
                               <button
                                 className="admin-action-delete"
                                 onClick={() =>
                                   deleteComplaint(
-                                    complaint.id
+                                    complaint._id
                                   )
                                 }
                                 title="Delete complaint"
+                                disabled={
+                                  deleting
+                                }
                               >
-                                <Trash2 size={16} />
+                                <Trash2
+                                  size={16}
+                                />
                               </button>
 
                             </div>
@@ -606,9 +869,8 @@ function AllComplaints() {
 
       </main>
 
-
       {/* =================================================
-          COMPLAINT DETAILS MODAL
+          DETAILS MODAL
           ================================================= */}
 
       {selectedComplaint && (
@@ -616,6 +878,7 @@ function AllComplaints() {
         <div
           className="admin-modal-overlay"
           onClick={() =>
+            !saving &&
             setSelectedComplaint(null)
           }
         >
@@ -627,8 +890,6 @@ function AllComplaints() {
             }
           >
 
-            {/* MODAL HEADER */}
-
             <div className="admin-modal-header">
 
               <div>
@@ -638,54 +899,65 @@ function AllComplaints() {
                 </h2>
 
                 <span>
-                  {selectedComplaint.id}
+                  {selectedComplaint._id}
                 </span>
 
               </div>
 
               <button
                 onClick={() =>
-                  setSelectedComplaint(null)
+                  !saving &&
+                  setSelectedComplaint(
+                    null
+                  )
                 }
+                disabled={saving}
               >
                 <X size={19} />
               </button>
 
             </div>
 
-
-            {/* MODAL BODY */}
-
             <div className="admin-modal-body">
 
-
-              {/* TITLE + CURRENT STATUS */}
+              {/* TITLE */}
 
               <div className="admin-detail-title">
 
                 <h3>
-                  {selectedComplaint.title}
+                  {selectedComplaint.title ||
+                    "Complaint"}
                 </h3>
-
-                {/* IMPORTANT:
-                    This remains the OLD status
-                    until Save Resolution is clicked.
-                */}
 
                 <span
                   className={`admin-status-badge ${getStatusClass(
                     selectedComplaint.status
                   )}`}
                 >
-                  {selectedComplaint.status}
+                  {getStatusText(
+                    selectedComplaint.status
+                  )}
                 </span>
 
               </div>
 
-
-              {/* DETAILS */}
+              {/* STUDENT */}
 
               <div className="admin-detail-grid">
+
+                <div>
+
+                  <span>
+                    Student
+                  </span>
+
+                  <strong>
+                    {selectedComplaint.studentName ||
+                      selectedComplaint.student?.name ||
+                      "Student"}
+                  </strong>
+
+                </div>
 
                 <div>
 
@@ -700,7 +972,6 @@ function AllComplaints() {
 
                 </div>
 
-
                 <div>
 
                   <span>
@@ -713,7 +984,6 @@ function AllComplaints() {
                   </strong>
 
                 </div>
-
 
                 <div>
 
@@ -728,7 +998,6 @@ function AllComplaints() {
 
                 </div>
 
-
                 <div>
 
                   <span>
@@ -736,14 +1005,14 @@ function AllComplaints() {
                   </span>
 
                   <strong>
-                    {selectedComplaint.date ||
-                      "—"}
+                    {formatDate(
+                      selectedComplaint.createdAt
+                    )}
                   </strong>
 
                 </div>
 
               </div>
-
 
               {/* DESCRIPTION */}
 
@@ -760,10 +1029,7 @@ function AllComplaints() {
 
               </div>
 
-
-              {/* =================================================
-                  STATUS SELECT
-                  ================================================= */}
+              {/* STATUS */}
 
               <div className="admin-status-section">
 
@@ -775,63 +1041,58 @@ function AllComplaints() {
 
                   <button
                     className={
-                      selectedStatus === "Pending"
+                      selectedStatus ===
+                      "PENDING"
                         ? "status-pending selected"
                         : "status-pending"
                     }
                     onClick={() =>
-                      selectStatus("Pending")
+                      selectStatus(
+                        "PENDING"
+                      )
                     }
+                    disabled={saving}
                   >
                     Pending
                   </button>
 
-
                   <button
                     className={
-                      selectedStatus === "In Progress"
+                      selectedStatus ===
+                      "IN-PROGRESS"
                         ? "status-progress selected"
                         : "status-progress"
                     }
                     onClick={() =>
-                      selectStatus("In Progress")
+                      selectStatus(
+                        "IN-PROGRESS"
+                      )
                     }
+                    disabled={saving}
                   >
                     In Progress
                   </button>
 
-
                   <button
                     className={
-                      selectedStatus === "Resolved"
+                      selectedStatus ===
+                      "RESOLVED"
                         ? "status-resolved selected"
                         : "status-resolved"
                     }
                     onClick={() =>
-                      selectStatus("Resolved")
+                      selectStatus(
+                        "RESOLVED"
+                      )
                     }
+                    disabled={saving}
                   >
                     Resolved
-                  </button>
-
-
-                  <button
-                    className={
-                      selectedStatus === "Rejected"
-                        ? "status-rejected selected"
-                        : "status-rejected"
-                    }
-                    onClick={() =>
-                      selectStatus("Rejected")
-                    }
-                  >
-                    Rejected
                   </button>
 
                 </div>
 
               </div>
-
 
               {/* RESOLUTION */}
 
@@ -844,20 +1105,20 @@ function AllComplaints() {
                 <textarea
                   value={resolution}
                   onChange={(e) =>
-                    setResolution(e.target.value)
+                    setResolution(
+                      e.target.value
+                    )
                   }
                   placeholder="Enter resolution details..."
                   rows="4"
+                  disabled={saving}
                 />
 
               </div>
 
             </div>
 
-
-            {/* =================================================
-                MODAL FOOTER
-                ================================================= */}
+            {/* FOOTER */}
 
             <div className="admin-modal-footer">
 
@@ -866,16 +1127,21 @@ function AllComplaints() {
                 onClick={() =>
                   setSelectedComplaint(null)
                 }
+                disabled={saving}
               >
                 Cancel
               </button>
 
-
               <button
                 className="admin-modal-save"
                 onClick={saveResolution}
+                disabled={saving}
               >
-                Save Resolution
+
+                {saving
+                  ? "Saving..."
+                  : "Save Resolution"}
+
               </button>
 
             </div>
@@ -886,27 +1152,28 @@ function AllComplaints() {
 
       )}
 
-
-      {/* =================================================
-          SUCCESS POPUP
-          ================================================= */}
+      {/* SUCCESS */}
 
       {showSuccess && (
 
         <div className="admin-success-popup">
 
           <div className="admin-success-icon">
+
             <CheckCircle size={20} />
+
           </div>
 
           <div>
+
             <strong>
-              Status updated successfully!
+              Complaint updated successfully!
             </strong>
 
             <span>
-              Complaint details have been saved.
+              Changes have been saved to MongoDB.
             </span>
+
           </div>
 
         </div>

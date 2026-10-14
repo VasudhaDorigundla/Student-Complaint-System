@@ -9,7 +9,9 @@ import {
   MapPin,
   ArrowLeft,
   Inbox,
+  AlertCircle,
 } from "lucide-react";
+import api from "../../services/api";
 
 function MyComplaints() {
   const navigate = useNavigate();
@@ -21,57 +23,88 @@ function MyComplaints() {
   const [statusFilter, setStatusFilter] = useState("All");
   const [categoryFilter, setCategoryFilter] = useState("All");
 
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
   useEffect(() => {
-    const user = JSON.parse(
-      localStorage.getItem("campuscareCurrentUser") || "null"
-    );
+    const loadComplaints = async () => {
+      const user = JSON.parse(
+        localStorage.getItem("campuscareCurrentUser") || "null"
+      );
 
-    if (!user || user.role !== "student") {
-      navigate("/login");
-      return;
-    }
+      const token = localStorage.getItem("campuscareToken");
 
-    setCurrentUser(user);
+      if (!user || user.role !== "student" || !token) {
+        navigate("/login");
+        return;
+      }
 
-    const allComplaints = JSON.parse(
-      localStorage.getItem("campuscareComplaints") || "[]"
-    );
+      setCurrentUser(user);
 
-    const studentComplaints = allComplaints.filter(
-      (complaint) =>
-        complaint.studentEmail === user.email ||
-        complaint.studentId === user.studentId
-    );
+      try {
+        const response = await api.get("/complaints/my", {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        });
 
-    setComplaints(studentComplaints);
+        setComplaints(response.data.complaints || []);
+        setError("");
+      } catch (error) {
+        console.error(
+          "Get complaints error:",
+          error
+        );
+
+        if (error.response?.status === 401) {
+          localStorage.removeItem("campuscareToken");
+          localStorage.removeItem("campuscareCurrentUser");
+          navigate("/login");
+          return;
+        }
+
+        setError(
+          error.response?.data?.message ||
+            "Unable to load your complaints."
+        );
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadComplaints();
   }, [navigate]);
 
-  const filteredComplaints = complaints.filter((complaint) => {
-    const matchesSearch =
-      complaint.title
-        ?.toLowerCase()
-        .includes(search.toLowerCase()) ||
-      complaint.id
-        ?.toLowerCase()
-        .includes(search.toLowerCase()) ||
-      complaint.description
-        ?.toLowerCase()
-        .includes(search.toLowerCase());
+  const filteredComplaints = complaints.filter(
+    (complaint) => {
+      const searchText = search.toLowerCase();
 
-    const matchesStatus =
-      statusFilter === "All" ||
-      complaint.status === statusFilter;
+      const matchesSearch =
+        complaint.title
+          ?.toLowerCase()
+          .includes(searchText) ||
+        complaint._id
+          ?.toLowerCase()
+          .includes(searchText) ||
+        complaint.description
+          ?.toLowerCase()
+          .includes(searchText);
 
-    const matchesCategory =
-      categoryFilter === "All" ||
-      complaint.category === categoryFilter;
+      const matchesStatus =
+        statusFilter === "All" ||
+        complaint.status === statusFilter;
 
-    return (
-      matchesSearch &&
-      matchesStatus &&
-      matchesCategory
-    );
-  });
+      const matchesCategory =
+        categoryFilter === "All" ||
+        complaint.category === categoryFilter;
+
+      return (
+        matchesSearch &&
+        matchesStatus &&
+        matchesCategory
+      );
+    }
+  );
 
   const categories = [
     ...new Set(
@@ -81,18 +114,64 @@ function MyComplaints() {
     ),
   ];
 
+  const getStatusText = (status) => {
+    if (status === "IN-PROGRESS") {
+      return "In Progress";
+    }
+
+    if (status === "RESOLVED") {
+      return "Resolved";
+    }
+
+    return "Pending";
+  };
+
   const getStatusClass = (status) => {
-    if (status === "Resolved") return "my-status resolved";
-    if (status === "In Progress") return "my-status progress";
-    if (status === "Rejected") return "my-status rejected";
+    if (status === "RESOLVED") {
+      return "my-status resolved";
+    }
+
+    if (status === "IN-PROGRESS") {
+      return "my-status progress";
+    }
+
     return "my-status pending";
   };
 
   const getPriorityClass = (priority) => {
-    if (priority === "Urgent") return "priority urgent";
-    if (priority === "High") return "priority high";
-    if (priority === "Low") return "priority low";
+    if (priority === "Urgent") {
+      return "priority urgent";
+    }
+
+    if (priority === "High") {
+      return "priority high";
+    }
+
+    if (priority === "Low") {
+      return "priority low";
+    }
+
     return "priority medium";
+  };
+
+  const getComplaintDate = (complaint) => {
+    if (!complaint.createdAt) {
+      return "—";
+    }
+
+    return new Date(
+      complaint.createdAt
+    ).toLocaleDateString("en-IN");
+  };
+
+  const getUpdatedDate = (complaint) => {
+    if (!complaint.updatedAt) {
+      return getComplaintDate(complaint);
+    }
+
+    return new Date(
+      complaint.updatedAt
+    ).toLocaleDateString("en-IN");
   };
 
   return (
@@ -169,6 +248,7 @@ function MyComplaints() {
           </div>
 
           <div>
+
             <strong>
               {currentUser?.name || "Student"}
             </strong>
@@ -176,6 +256,7 @@ function MyComplaints() {
             <span>
               {currentUser?.department || "Student"}
             </span>
+
           </div>
 
         </div>
@@ -207,11 +288,13 @@ function MyComplaints() {
             </div>
 
             <div>
+
               <strong>
                 {currentUser?.name || "Student"}
               </strong>
 
               <span>Student</span>
+
             </div>
 
           </div>
@@ -254,6 +337,15 @@ function MyComplaints() {
 
           </div>
 
+          {/* ERROR */}
+
+          {error && (
+            <div className="complaint-form-error">
+              <AlertCircle size={17} />
+              {error}
+            </div>
+          )}
+
           {/* FILTER BAR */}
 
           <div className="complaints-filter-card">
@@ -287,20 +379,16 @@ function MyComplaints() {
                   All Status
                 </option>
 
-                <option value="Pending">
+                <option value="PENDING">
                   Pending
                 </option>
 
-                <option value="In Progress">
+                <option value="IN-PROGRESS">
                   In Progress
                 </option>
 
-                <option value="Resolved">
+                <option value="RESOLVED">
                   Resolved
-                </option>
-
-                <option value="Rejected">
-                  Rejected
                 </option>
               </select>
 
@@ -337,23 +425,46 @@ function MyComplaints() {
 
           {/* COUNT */}
 
-          <div className="complaints-result-info">
+          {!loading && (
+            <div className="complaints-result-info">
 
-            <strong>
-              {filteredComplaints.length}
-            </strong>
+              <strong>
+                {filteredComplaints.length}
+              </strong>
 
-            <span>
-              {filteredComplaints.length === 1
-                ? " complaint found"
-                : " complaints found"}
-            </span>
+              <span>
+                {filteredComplaints.length === 1
+                  ? " complaint found"
+                  : " complaints found"}
+              </span>
 
-          </div>
+            </div>
+          )}
 
-          {/* COMPLAINTS */}
+          {/* LOADING */}
 
-          {filteredComplaints.length === 0 ? (
+          {loading ? (
+
+            <div className="complaints-empty">
+
+              <div className="empty-icon">
+                <FileText size={32} />
+              </div>
+
+              <h2>
+                Loading complaints...
+              </h2>
+
+              <p>
+                Please wait while we load your
+                complaints from the server.
+              </p>
+
+            </div>
+
+          ) : filteredComplaints.length === 0 ? (
+
+            /* EMPTY */
 
             <div className="complaints-empty">
 
@@ -384,104 +495,112 @@ function MyComplaints() {
 
           ) : (
 
+            /* COMPLAINT LIST */
+
             <div className="complaints-list">
 
-              {filteredComplaints.map((complaint) => (
+              {filteredComplaints.map(
+                (complaint) => (
 
-                <div
-                  className="complaint-list-card"
-                  key={complaint.id}
-                >
+                  <div
+                    className="complaint-list-card"
+                    key={complaint._id}
+                  >
 
-                  <div className="complaint-card-top">
+                    <div className="complaint-card-top">
 
-                    <div className="complaint-card-icon">
-                      <FileText size={20} />
-                    </div>
-
-                    <div className="complaint-card-title">
-
-                      <div className="complaint-id">
-                        {complaint.id}
+                      <div className="complaint-card-icon">
+                        <FileText size={20} />
                       </div>
 
-                      <h2>
-                        {complaint.title}
-                      </h2>
+                      <div className="complaint-card-title">
+
+                        <div className="complaint-id">
+                          {complaint._id}
+                        </div>
+
+                        <h2>
+                          {complaint.title}
+                        </h2>
+
+                      </div>
+
+                      <span
+                        className={getStatusClass(
+                          complaint.status
+                        )}
+                      >
+                        {getStatusText(
+                          complaint.status
+                        )}
+                      </span>
 
                     </div>
 
-                    <span
-                      className={getStatusClass(
-                        complaint.status
-                      )}
-                    >
-                      {complaint.status}
-                    </span>
+                    <p className="complaint-description">
+                      {complaint.description}
+                    </p>
+
+                    <div className="complaint-card-details">
+
+                      <div>
+                        <FileText size={14} />
+                        <span>
+                          {complaint.category}
+                        </span>
+                      </div>
+
+                      <div>
+                        <MapPin size={14} />
+                        <span>
+                          {complaint.location}
+                        </span>
+                      </div>
+
+                      <div>
+                        <CalendarDays size={14} />
+                        <span>
+                          {getComplaintDate(
+                            complaint
+                          )}
+                        </span>
+                      </div>
+
+                      <span
+                        className={getPriorityClass(
+                          complaint.priority
+                        )}
+                      >
+                        {complaint.priority ||
+                          "Medium"}{" "}
+                        Priority
+                      </span>
+
+                    </div>
+
+                    <div className="complaint-card-footer">
+
+                      <span>
+                        Last updated{" "}
+                        {getUpdatedDate(
+                          complaint
+                        )}
+                      </span>
+
+                      <Link
+                        to={`/student/complaint-details/${complaint._id}`}
+                        className="view-complaint-btn"
+                      >
+                        <Eye size={14} />
+                        View Details
+                      </Link>
+
+                    </div>
 
                   </div>
 
-                  <p className="complaint-description">
-                    {complaint.description}
-                  </p>
-
-                  <div className="complaint-card-details">
-
-                    <div>
-                      <FileText size={14} />
-                      <span>
-                        {complaint.category}
-                      </span>
-                    </div>
-
-                    <div>
-                      <MapPin size={14} />
-                      <span>
-                        {complaint.location}
-                      </span>
-                    </div>
-
-                    <div>
-                      <CalendarDays size={14} />
-                      <span>
-                        {complaint.date}
-                      </span>
-                    </div>
-
-                    <span
-                      className={getPriorityClass(
-                        complaint.priority
-                      )}
-                    >
-                      {complaint.priority} Priority
-                    </span>
-
-                  </div>
-
-                  <div className="complaint-card-footer">
-
-                    <span>
-                      Last updated{" "}
-                      {complaint.updatedAt
-                        ? new Date(
-                            complaint.updatedAt
-                          ).toLocaleDateString("en-IN")
-                        : complaint.date}
-                    </span>
-
-                    <Link
-                      to={`/student/complaint-details/${complaint.id}`}
-                      className="view-complaint-btn"
-                    >
-                      <Eye size={14} />
-                      View Details
-                    </Link>
-
-                  </div>
-
-                </div>
-
-              ))}
+                )
+              )}
 
             </div>
 
